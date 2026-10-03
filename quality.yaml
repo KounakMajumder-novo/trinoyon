@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "roi_normalized": [0.05, 0.05, 0.9, 0.9],
+  "sample_every_n_frames": 3,
+  "polarity": "dark",
+  "contrast_threshold": 35,
+  "min_length_px": 16,
+  "max_width_px": 12,
+  "min_aspect_ratio": 2.2,
+  "min_area_px": 8,
+  "warning_length_px": 30,
+  "critical_length_px": 90,
+  "critical_width_px": 8,
+  "confirmation_frames": 3,
+  "max_candidates": 20,
+  "pixels_per_mm": 0
+}

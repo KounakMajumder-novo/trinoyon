@@ -13,6 +13,8 @@ Point = Tuple[float, float]
 class Zone:
     name: str
     polygon: Tuple[Point, ...]
+    safety_level: str = "normal"
+    recommended_action: str = "Continue normal monitoring."
     def contains(self, point: Point) -> bool:
         x, y = point
         inside = False
@@ -37,7 +39,15 @@ class IndustrialConfig:
     rules_enabled: Tuple[str, ...] = ("zone_entry", "zone_exit", "excessive_dwell", "wrong_zone", "unexpected_object", "count_exceeded", "missing_object")
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "IndustrialConfig":
-        zones = tuple(Zone(str(z["name"]), tuple((float(p[0]),float(p[1])) for p in z["polygon"])) for z in raw.get("zones", []))
+        zones = tuple(
+            Zone(
+                str(z["name"]),
+                tuple((float(p[0]),float(p[1])) for p in z["polygon"]),
+                str(z.get("safety_level", "critical" if z.get("hazard", False) else "normal")).lower(),
+                str(z.get("recommended_action", "Stop/avoid the configured hazard area and request operator verification.")),
+            )
+            for z in raw.get("zones", [])
+        )
         dwell = {str(k):float(v) for k,v in raw.get("dwell_limit_seconds",{}).items()}
         if "dwell_seconds" in raw:
             dwell.update({z.name:float(raw["dwell_seconds"]) for z in zones if z.name not in dwell})
@@ -73,6 +83,7 @@ class IndustrialMonitor:
         self._track_zone: Dict[str,Optional[str]]={}
         self._zone_since: Dict[Tuple[str,str],float]={}
         self._active: set[Tuple[str,str]] = set()
+        self._current_alerts: Dict[Tuple[str,str], IndustrialEvent] = {}
         self._started: Optional[float]=None
     @staticmethod
     def _get(obj: Any, *names: str, default: Any=None) -> Any:
@@ -82,19 +93,23 @@ class IndustrialMonitor:
         return default
     def _emit(self, out: List[IndustrialEvent], now: float, rule: str, key: str, message: str, **kw: Any) -> None:
         k=(rule,key)
-        if k in self._active: return
+        if k in self._active or rule not in self.config.rules_enabled: return
         self._active.add(k)
-        if rule not in self.config.rules_enabled: return
         e=IndustrialEvent(datetime.fromtimestamp(now,timezone.utc).isoformat(),rule,kw.pop("severity","info"),message,**kw)
         out.append(e); self.history.append(e)
+        if e.severity in ("warning", "critical"):
+            self._current_alerts[k] = e
     def update(self, tracks: Iterable[Any], timestamp: Optional[float]=None) -> List[IndustrialEvent]:
+        tracks=list(tracks)
         now=float(timestamp if timestamp is not None else datetime.now(timezone.utc).timestamp())
         if self._started is None: self._started=now
-        out: List[IndustrialEvent]=[]; counts: Dict[str,int]={}; conditions=set()
+        out: List[IndustrialEvent]=[]; counts: Dict[str,int]={}; conditions=set(); observed=set()
         for tr in tracks:
             tid=str(self._get(tr,"track_id","id",default=""))
             if not tid: continue
-            if str(self._get(tr,"state",default="TRACKING")).upper() in ("LOST","REMOVED"): continue
+            state=str(self._get(tr,"state",default="TRACKING")).upper()
+            if state in ("LOST","MISSING","REMOVED"): continue
+            observed.add(tid)
             cls=str(self._get(tr,"class_name","class",default="unknown")); counts[cls]=counts.get(cls,0)+1
             x=self._get(tr,"world_x","x_m","x"); y=self._get(tr,"world_y","y_m","y")
             zone=None
@@ -102,11 +117,28 @@ class IndustrialMonitor:
                 zone=next((z.name for z in self.config.zones if z.contains((float(x),float(y)))),None)
             prior=self._track_zone.get(tid)
             if prior != zone:
-                if prior: self._emit(out,now,"zone_exit",tid+":"+prior,f"{tid} exited {prior}",track_id=tid,class_name=cls,zone=prior)
-                if zone: self._emit(out,now,"zone_entry",tid+":"+zone,f"{tid} entered {zone}",track_id=tid,class_name=cls,zone=zone)
+                if prior:
+                    self._active.discard(("zone_exit",tid+":"+prior))
+                    self._emit(out,now,"zone_exit",tid+":"+prior,f"{tid} exited {prior}",track_id=tid,class_name=cls,zone=prior)
+                if zone:
+                    self._active.discard(("zone_entry",tid+":"+zone))
+                    self._emit(out,now,"zone_entry",tid+":"+zone,f"{tid} entered {zone}",track_id=tid,class_name=cls,zone=zone)
                 self._track_zone[tid]=zone
                 for k in [k for k in self._zone_since if k[0]==tid]: self._zone_since.pop(k,None)
                 if zone: self._zone_since[(tid,zone)]=now
+            zone_config = next((z for z in self.config.zones if z.name == zone), None)
+            if zone_config is not None and zone_config.safety_level in ("warning", "critical"):
+                alert_key = ("hazard_zone_entry", tid)
+                conditions.add(alert_key)
+                self._emit(
+                    out, now, "hazard_zone_entry", tid,
+                    f"{tid} entered configured {zone_config.safety_level} hazard zone {zone}",
+                    severity=zone_config.safety_level,
+                    track_id=tid,
+                    class_name=cls,
+                    zone=zone,
+                    details={"recommended_action": zone_config.recommended_action},
+                )
             if zone:
                 self._zone_since.setdefault((tid,zone),now)
                 limit=self.config.dwell_limit_seconds.get(zone)
@@ -126,9 +158,20 @@ class IndustrialMonitor:
                 k=(rule,cls)
                 if condition:
                     conditions.add(k); self._emit(out,now,rule,cls,msg,severity="warning",class_name=cls,details={"actual":actual,"expected":expected})
+        for tid, prior_zone in list(self._track_zone.items()):
+            if tid not in observed and prior_zone:
+                cls = next((str(self._get(tr, "class_name", "class", default="unknown")) for tr in tracks
+                            if str(self._get(tr, "track_id", "id", default="")) == tid), "unknown")
+                self._emit(out,now,"zone_exit",tid+":"+prior_zone,f"{tid} left {prior_zone} after becoming unavailable",track_id=tid,class_name=cls,zone=prior_zone)
+                self._track_zone[tid]=None
+                self._zone_since.pop((tid, prior_zone),None)
         # Re-arm transition alerts after a condition clears.
-        self._active={k for k in self._active if k[0] not in ("excessive_dwell","wrong_zone","unexpected_object","missing_object","count_exceeded") or k in conditions}
+        persistent_rules=("excessive_dwell","wrong_zone","unexpected_object","missing_object","count_exceeded","hazard_zone_entry")
+        self._active={k for k in self._active if k[0] not in persistent_rules or k in conditions}
+        self._current_alerts={k:v for k,v in self._current_alerts.items() if k[0] not in persistent_rules or k in conditions}
         return out
+    def active_alerts(self) -> List[Dict[str,Any]]:
+        return [event.as_dict() for event in self._current_alerts.values()]
     def events(self, limit: Optional[int]=None) -> List[Dict[str,Any]]:
         items=list(self.history)
         if limit is not None: items=items[-max(0,int(limit)):]

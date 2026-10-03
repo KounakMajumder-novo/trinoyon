@@ -1,1 +1,1 @@
-{"association":"greedy_iou","max_lost_frames":12,"minimum_iou":0.15}
+{"association":"motion_appearance_greedy","max_lost_frames":24,"max_lost_seconds":2.5,"reid_window_seconds":8.0,"minimum_iou":0.10,"max_center_distance":1.5,"reid_similarity_threshold":0.82,"min_detection_confidence":0.25}

@@ -1,15 +1,17 @@
-"""Create a source-only ZIP, excluding local environments, bytecode, and user datasets."""
+"""Create a clean source ZIP for the standalone Windows webcam demo."""
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT.parent.parent / "outputs" / "offline-vision-x.zip"
-SKIP = {".venv", "__pycache__", ".git"}
+ROOT = Path(__file__).resolve().parent
+OUTPUT = ROOT / "trishul.x.zip"
+SKIP = {".venv", "__pycache__", ".git", "logs", "config", "trishul.x"}
+SKIP_NAMES = {"trishul.x.zip", "final_runable.zip", "final_project.zip"}
 
-OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 with ZipFile(OUTPUT, "w", ZIP_DEFLATED) as archive:
     for path in ROOT.rglob("*"):
         if not path.is_file() or any(part in SKIP for part in path.relative_to(ROOT).parts):
+            continue
+        if path.name in SKIP_NAMES:
             continue
         if path.name.endswith((".pyc", ".pyo")):
             continue

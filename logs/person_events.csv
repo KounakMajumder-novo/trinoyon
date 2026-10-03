@@ -1,0 +1,23 @@
+Person_ID,Timestamp,Event_Type,Safety_Status,Confidence,Reason,Recommended_Action
+1,2026-10-03T05:25:35.407+00:00,lost,MISSING,0.307,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+1,2026-10-03T05:25:35.982+00:00,detected,SAFE,0.689,Normal movement and visibility detected in the webcam frame.,Continue normal monitoring.
+1,2026-10-03T05:25:36.211+00:00,lost,MISSING,0.689,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+1,2026-10-03T05:25:36.587+00:00,detected,SAFE,0.385,Normal movement and visibility detected in the webcam frame.,Continue normal monitoring.
+2,2026-10-03T05:25:36.772+00:00,lost,MISSING,0.707,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+1,2026-10-03T05:25:36.947+00:00,lost,MISSING,0.542,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+1,2026-10-03T05:25:37.120+00:00,detected,SAFE,0.336,Normal movement and visibility detected in the webcam frame.,Continue normal monitoring.
+1,2026-10-03T05:25:37.291+00:00,lost,MISSING,0.336,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+1,2026-10-03T05:25:37.492+00:00,detected,WARNING,0.413,Person is partially occluded or moving unusually slowly compared with the expected range.,Continue monitoring and re-check quickly.
+1,2026-10-03T05:25:37.675+00:00,lost,MISSING,0.413,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+1,2026-10-03T05:25:38.032+00:00,detected,SAFE,0.314,Normal movement and visibility detected in the webcam frame.,Continue normal monitoring.
+1,2026-10-03T05:25:38.577+00:00,lost,MISSING,0.704,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+2,2026-10-03T05:25:40.855+00:00,detected,SAFE,0.534,Normal movement and visibility detected in the webcam frame.,Continue normal monitoring.
+2,2026-10-03T05:25:41.101+00:00,lost,MISSING,0.534,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+2,2026-10-03T05:25:41.879+00:00,detected,SAFE,0.293,Normal movement and visibility detected in the webcam frame.,Continue normal monitoring.
+2,2026-10-03T05:25:42.086+00:00,lost,MISSING,0.293,Person disappeared from the webcam view and could not be reacquired within the configured timeout.,Verify reacquisition and continue monitoring.
+7,2026-10-03T07:50:22.036+00:00,operator assistance requested,WARNING,0.8,Operator requested review (possible_distress); no automated person-risk inference was made.,Operator: verify the live scene and use the approved human volunteer process if appropriate.
+9,2026-10-03T07:50:22.124+00:00,operator assistance requested,WARNING,0.8,Operator requested review (operator_observed_concern); no automated person-risk inference was made.,Operator: verify the live scene and use the approved human volunteer process if appropriate.
+7,2026-10-03T08:22:01.449+00:00,operator assistance requested,WARNING,0.8,Operator requested review (possible_distress); no automated person-risk inference was made.,Operator: verify the live scene and use the approved human volunteer process if appropriate.
+9,2026-10-03T08:22:01.604+00:00,operator assistance requested,WARNING,0.8,Operator requested review (operator_observed_concern); no automated person-risk inference was made.,Operator: verify the live scene and use the approved human volunteer process if appropriate.
+7,2026-10-03T09:13:51.373+00:00,operator assistance requested,WARNING,0.8,Operator requested review (possible_distress); no automated person-risk inference was made.,Operator: verify the live scene and use the approved human volunteer process if appropriate.
+9,2026-10-03T09:13:51.529+00:00,operator assistance requested,WARNING,0.8,Operator requested review (operator_observed_concern); no automated person-risk inference was made.,Operator: verify the live scene and use the approved human volunteer process if appropriate.

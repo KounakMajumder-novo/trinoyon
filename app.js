@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const API = { status: '/api/status', tracks: '/api/tracks', events: '/api/events', stream: '/video.mjpg' };
+  const API = { status: '/api/status', tracks: '/api/tracks', events: '/api/events', safety: '/api/public-safety', quality: '/api/quality/status', stream: '/video.mjpg' };
   const video = $('video');
   let streamTimer;
   const value = (obj, ...keys) => { for (const k of keys) if (obj?.[k] !== undefined && obj[k] !== null) return obj[k]; return null; };
@@ -20,9 +20,14 @@
     $('camera-dot').className = `status-dot ${cameraOnline ? 'online' : 'offline'}`;
     $('camera-detail').textContent = typeof cam === 'object' ? safe(value(cam,'name','source','message') || (cameraOnline ? 'Frame source connected' : 'No frame source')) : (safe(value(s,'camera_message','camera_detail') || (cameraOnline ? 'Frame source connected' : 'Camera unavailable')));
     $('fps').textContent = fmt(value(s,'fps','processing_fps'),1);
-    $('latency').textContent = fmt(value(s,'latency_ms','processing_latency_ms','latency'),0);
+    $('latency').textContent = fmt(value(s,'inference_time_ms','latency_ms','processing_latency_ms','latency'),0);
+    $('device').textContent = safe(value(s,'device') || 'CPU');
+    $('device-detail').textContent = value(s,'gpu_active') ? 'CUDA inference verified' : (value(s,'gpu_available') ? 'GPU found · current detector uses CPU' : 'CUDA unavailable · CPU active');
     $('active-count').textContent = safe(value(s,'active_tracks','track_count') ?? '—');
     $('detection-count').textContent = safe(value(s,'detection_count','detections_count') ?? '—');
+    $('lost-count').textContent = safe(value(s,'lost_tracks','lost_persons') ?? 0);
+    $('warning-count').textContent = safe(value(s,'warnings') ?? 0);
+    $('critical-count').textContent = safe(value(s,'critical') ?? 0);
     const mode = String(value(s,'mode','application_mode') || '').toLowerCase();
     document.querySelectorAll('.mode-button').forEach(b => b.classList.toggle('active', mode && ((mode.includes('industrial') && b.dataset.mode==='industrial') || (!mode.includes('industrial') && b.dataset.mode==='human'))));
     const width=value(s,'frame_width','width'), height=value(s,'frame_height','height');
@@ -34,24 +39,40 @@
   function renderTracks(payload) {
     const tracks=listFrom(payload); const tbody=$('tracks'); tbody.replaceChildren();
     $('track-updated').textContent=`Updated ${new Date().toLocaleTimeString()}`;
-    if(!tracks.length){tbody.innerHTML='<tr><td colspan="5" class="empty-cell">No active tracks reported</td></tr>';}
+    if(!tracks.length){tbody.innerHTML='<tr><td colspan="6" class="empty-cell">No active tracks reported</td></tr>';}
     tracks.forEach(t=>{
       const id=value(t,'id','track_id'), cls=value(t,'class_name','class','label'), state=value(t,'state','status')||'TRACKING';
       const x=value(t,'world_x','x'), y=value(t,'world_y','y'), speed=value(t,'speed','speed_mps');
-      const pos=x!==null&&y!==null?`${fmt(x)} m, ${fmt(y)} m`:'—';
+      const isImage=value(t,'coordinate_frame')==='image_pixels';
+      const px=value(t,'center_x_px'), py=value(t,'center_y_px');
+      const pos=x!==null&&y!==null?`${fmt(x)} ${isImage?'px':'m'}, ${fmt(y)} ${isImage?'px':'m'}`:(px!==null&&py!==null?`${fmt(px,0)} px, ${fmt(py,0)} px`:'—');
       const direction=value(t,'direction','heading');
-      const tr=document.createElement('tr'); tr.innerHTML=`<td><div class="object-id"></div><div class="object-class"></div></td><td></td><td></td><td></td><td><span class="state-pill"></span></td>`;
+      const tr=document.createElement('tr'); tr.innerHTML=`<td><div class="object-id"></div><div class="object-class"></div></td><td></td><td></td><td></td><td><span class="state-pill"></span></td><td></td>`;
       tr.children[0].querySelector('.object-id').textContent=safe(id); tr.children[0].querySelector('.object-class').textContent=safe(cls);
       const pixelSpeed=value(t,'speed_px_s');
       tr.children[1].textContent=pos; tr.children[2].textContent=speed!==null?`${fmt(speed,1)} m/s${direction?` · ${direction}`:''}`:(pixelSpeed!==null?`${fmt(pixelSpeed,0)} px/s${direction?` · ${direction}`:''}`:'—'); tr.children[3].textContent=safe(value(t,'zone','zone_name'));
-      const pill=tr.children[4].querySelector('.state-pill'); pill.textContent=String(state).toUpperCase(); if(/lost|removed|missing/i.test(state))pill.classList.add('lost'); tbody.append(tr);
+      const safety=value(t,'safety_status')||'SAFE';
+      const pill=tr.children[4].querySelector('.state-pill'); pill.textContent=`${String(state).toUpperCase()} · ${String(safety).toUpperCase()}`; if(/lost|removed|missing/i.test(state))pill.classList.add('lost'); if(String(safety).toUpperCase()==='WARNING'){pill.style.color='var(--amber)';pill.style.background='#302719';} else if(String(safety).toUpperCase()==='CRITICAL'){pill.style.color='var(--red)';pill.style.background='#301b20';}
+      if(['WARNING','CRITICAL','MISSING'].includes(String(safety).toUpperCase())) {
+        const action=document.createElement('button');
+        action.className='assistance-button';
+        action.type='button';
+        action.textContent='Request review';
+        action.dataset.personId=String(value(t,'id','track_id')||'');
+        tr.children[5].append(action);
+      } else {
+        tr.children[5].textContent='Human verification';
+      }
+      tbody.append(tr);
     });
     renderMap(tracks);
   }
   function renderMap(tracks) {
     const points=$('map-points'); points.replaceChildren(); let located=0;
-    const statusWindow=window.__vxStatus||{}; const width=Number(value(statusWindow,'map_width_m','room_width_m'))||10; const height=Number(value(statusWindow,'map_height_m','room_height_m'))||8;
-    tracks.forEach(t=>{const x=Number(value(t,'world_x','x')), y=Number(value(t,'world_y','y')); if(!Number.isFinite(x)||!Number.isFinite(y))return; located++;
+    const statusWindow=window.__vxStatus||{}; const imageCoordinates=String(value(statusWindow,'coordinate_unit')||'').toLowerCase().includes('pixel');
+    const width=imageCoordinates?(Number(value(statusWindow,'frame_width'))||640):(Number(value(statusWindow,'room_width_m'))||10);
+    const height=imageCoordinates?(Number(value(statusWindow,'frame_height'))||480):(Number(value(statusWindow,'room_height_m'))||8);
+    tracks.forEach(t=>{const rawX=imageCoordinates?value(t,'center_x_px'):value(t,'world_x','x'), rawY=imageCoordinates?value(t,'center_y_px'):value(t,'world_y','y'); if(rawX===null||rawY===null)return; const x=Number(rawX), y=Number(rawY); if(!Number.isFinite(x)||!Number.isFinite(y))return; located++;
       const dot=document.createElement('div'); dot.className='map-dotpoint'+(/component|object|product|part/i.test(String(value(t,'class_name','class','label')||''))?' component':''); dot.style.left=`${Math.max(2,Math.min(98,x/width*100))}%`; dot.style.top=`${100-Math.max(2,Math.min(98,y/height*100))}%`;
       const label=document.createElement('span'); label.textContent=safe(value(t,'id','track_id')); dot.append(label); points.append(dot);
     }); $('map-empty').hidden=located>0; $('map-unit').textContent=String(value(statusWindow,'coordinate_unit')||'METERS').toUpperCase();
@@ -61,12 +82,60 @@
     if(!events.length){box.innerHTML='<div class="empty-cell">No events reported</div>';return;}
     events.slice(0,40).forEach(e=>{const row=document.createElement('div');row.className='event-row';const time=value(e,'timestamp','time','created_at');let display='—';if(time){const d=new Date(time);display=Number.isNaN(d.getTime())?String(time):d.toLocaleTimeString();}const level=String(value(e,'severity','level','type')||'info').toLowerCase();row.innerHTML='<div class="event-time"></div><div class="event-mark"></div><div><div class="event-text"></div><div class="event-meta"></div></div>';row.children[0].textContent=display;row.children[1].classList.toggle('warn',/warn|anomaly/i.test(level));row.children[1].classList.toggle('error',/error|critical/i.test(level));row.querySelector('.event-text').textContent=safe(value(e,'message','description','name'));row.querySelector('.event-meta').textContent=[value(e,'object_id','track_id'),value(e,'zone','zone_name'),level.toUpperCase()].filter(Boolean).join(' · ');box.append(row);});
   }
+  function renderPublicSafety(s) {
+    const bar = $('public-safety');
+    const status = String(value(s, 'status') || 'UNKNOWN').toUpperCase();
+    const level = ({ SAFE: 'safe', WARNING: 'warning', CRITICAL: 'critical', MISSING: 'missing' })[status] || 'none';
+    bar.dataset.level = level;
+    $('public-safety-status').textContent = s.person_id ? `${s.person_id} · ${status}` : status;
+    $('public-safety-reason').textContent = safe(value(s, 'reason'));
+    $('public-safety-action').textContent = `Recommended action: ${safe(value(s, 'recommended_action'))}`;
+    const counts = s.counts || {};
+    $('safety-warning-count').textContent = safe(counts.WARNING ?? 0);
+    $('safety-critical-count').textContent = safe(counts.CRITICAL ?? 0);
+    $('safety-missing-count').textContent = safe(counts.MISSING ?? 0);
+    $('industrial-alert-count').textContent = safe(value(s,'industrial_alert_count') ?? 0);
+    bar.title = `${safe(value(s, 'assessment_scope'))}${s.human_verification_required ? ' · Human verification required' : ''}`;
+  }
+  function renderQuality(q) {
+    const panel=$('quality-panel');
+    const status=String(value(q,'status')||'WAITING').toUpperCase();
+    const level=status==='CRITICAL'?'critical':status==='WARNING'?'warning':'none';
+    panel.dataset.level=level;
+    $('quality-status').textContent=q.enabled?`${status} · ${value(q,'severity')==='none'?'No confirmed candidate':`${value(q,'confirmed_candidate_count')||0} confirmed`}`:'Unavailable';
+    $('quality-detail').textContent=q.enabled
+      ? `${safe(value(q,'assessment_scope'))} ${value(q,'confirmed_candidate_count')||0} confirmed; ${value(q,'pending_candidate_count')||0} awaiting confirmation. Measurements: ${safe(value(q,'measurement_unit'))}.`
+      : 'Visual screening is unavailable. Check quality.yaml and application logs.';
+    $('quality-action').textContent=`Operator action: ${safe(value(q,'recommended_action'))}`;
+    $('quality-confirmed').textContent=safe(value(q,'confirmed_candidate_count')??0);
+  }
   async function poll() {
-    const results=await Promise.allSettled([get(API.status),get(API.tracks),get(API.events)]);
+    const results=await Promise.allSettled([get(API.status),get(API.tracks),get(API.events),get(API.safety),get(API.quality)]);
     if(results[0].status==='fulfilled'){window.__vxStatus=results[0].value;renderStatus(results[0].value);} else {const b=$('connection-banner');b.className='connection-banner error';b.textContent=`Local service unavailable · ${results[0].reason.message}`;$('camera-status').textContent='Unavailable';$('camera-dot').className='status-dot offline';$('camera-detail').textContent='Could not read /api/status';}
     if(results[1].status==='fulfilled')renderTracks(results[1].value); else {$('track-updated').textContent='Track feed unavailable';}
     if(results[2].status==='fulfilled')renderEvents(results[2].value);
+    if(results[3].status==='fulfilled')renderPublicSafety(results[3].value);
+    if(results[4].status==='fulfilled')renderQuality(results[4].value);
   }
+  document.addEventListener('click', async event => {
+    const button=event.target.closest('.assistance-button');
+    if(!button)return;
+    const personId=button.dataset.personId;
+    if(!window.confirm(`Create a local operator-review request for ${personId}? No face image or data will be sent externally.`))return;
+    button.disabled=true;
+    try {
+      const response=await fetch('/api/assistance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person_id:personId,reason:'operator_observed_concern',operator_confirmed:true})});
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.message||payload.error||`HTTP ${response.status}`);
+      $('connection-banner').className='connection-banner online';
+      $('connection-banner').textContent=`Local review request saved for ${personId}; follow your approved human handoff process.`;
+      await poll();
+    } catch(error) {
+      $('connection-banner').className='connection-banner error';
+      $('connection-banner').textContent=`Could not create local review request · ${error.message}`;
+      button.disabled=false;
+    }
+  });
   video.addEventListener('load',()=>{video.classList.add('loaded');$('video-message').hidden=true;clearTimeout(streamTimer);});
   video.addEventListener('error',()=>{video.classList.remove('loaded');$('video-message').hidden=false;$('video-message').querySelector('strong').textContent='CAMERA UNAVAILABLE';$('video-message').querySelector('small').textContent='No live stream at /video.mjpg';clearTimeout(streamTimer);streamTimer=setTimeout(()=>{video.src=`${API.stream}?t=${Date.now()}`;},5000);});
   $('refresh').addEventListener('click',()=>{poll();video.src=`${API.stream}?t=${Date.now()}`;});
